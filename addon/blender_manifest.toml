@@ -1,0 +1,11 @@
+schema_version = "1.0.0"
+id = "p1782_92"
+version = "0.1.0"
+name = "1782-92 Bridge"
+tagline = "Minimal local bridge for AI-driven Blender control"
+maintainer = "stickleetoto"
+type = "add-on"
+website = "https://github.com/stickleetoto/1782-92"
+tags = ["Development"]
+blender_version_min = "4.2.0"
+license = ["SPDX:MIT"]
