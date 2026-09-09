@@ -6,18 +6,23 @@
 
 - Blender bridge binds only to `127.0.0.1`.
 - Every bridge start creates a new random bearer token.
-- The token is discovered through an OS-temp state file rather than embedded in MCP tool arguments.
+- The token is discovered through an OS-temp state file rather than MCP arguments.
 - `apply` parses Python AST before execution.
-- Python imports and common dynamic-execution/file APIs are blocked.
+- Imports and common dynamic-execution/file APIs are blocked.
 - Private/dunder attribute traversal is blocked.
 - Blender save/load/import/export/script/preferences APIs are blocked from model-supplied code.
 - A reduced builtin set is supplied to executed code.
-- Request size and execution wait times are bounded.
-- Successful edits receive automatic checkpoint copies.
+- Request size and wait times are bounded.
+- Disk checkpoints are retained adaptively.
+- The Node bridge never automatically replays `apply` after an ambiguous transport failure.
+
+## Rollback limitation
+
+v0.1.1 attempts to push a Blender undo marker before `apply`. If generated code raises, one undo is attempted. Blender's undo system is not an ACID transaction mechanism, so complex operator behavior can make rollback incomplete. Treat it as a recovery guardrail only.
 
 ## Important limitation
 
-Python object-capability sandboxing is difficult. The AST guard is meant to prevent accidental or obvious unsafe behavior, not to safely execute adversarial code. A sufficiently determined hostile payload may find a bypass.
+Python object-capability sandboxing is difficult. The AST guard prevents accidental and obvious unsafe behavior; it is not designed to contain adversarial payloads.
 
 Therefore:
 
@@ -26,4 +31,4 @@ Therefore:
 3. Keep important Blender projects under normal versioned/backed-up storage.
 4. Treat generated `bpy` code as code execution with Blender-scoped authority.
 
-Security hardening should prefer reducing authority inside the bridge rather than adding more model-visible approval chatter, because the project's purpose is a small, low-token control surface.
+Hardening should reduce authority inside the bridge rather than add model-visible approval chatter, because a small low-token control surface is a core project goal.
