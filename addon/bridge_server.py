@@ -12,7 +12,7 @@ from typing import Any
 
 import bpy
 
-from . import engine
+from . import engine, hooks
 
 VERSION = "0.1.1"
 STATE_PATH = Path(tempfile.gettempdir()) / "1782-92-bridge.json"
@@ -115,7 +115,7 @@ def start_bridge() -> tuple[bool, str]:
         _SERVER.daemon_threads = True
         _RUNNING = True
         engine.reset_session()
-        engine.install_handlers()
+        hooks.install()
         if not bpy.app.timers.is_registered(_pump):
             bpy.app.timers.register(_pump, first_interval=0.03, persistent=True)
         _SERVER_THREAD = threading.Thread(target=_SERVER.serve_forever, name="1782-92-http", daemon=True)
@@ -124,14 +124,14 @@ def start_bridge() -> tuple[bool, str]:
         return True, f"127.0.0.1:{_SERVER.server_address[1]}"
     except Exception as exc:
         _RUNNING = False
-        engine.remove_handlers()
+        hooks.remove()
         return False, f"{type(exc).__name__}:{exc}"
 
 
 def stop_bridge() -> None:
     global _SERVER, _SERVER_THREAD, _TOKEN, _RUNNING
     _RUNNING = False
-    engine.remove_handlers()
+    hooks.remove()
     if _SERVER is not None:
         try:
             _SERVER.shutdown()
