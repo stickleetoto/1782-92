@@ -80,7 +80,8 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:
             self._reply(400, {"ok": False, "error": "bad_json"})
             return
-        timeout = 250.0 if self.path == "/render" else 190.0 if self.path == "/apply" else 20.0
+        # Finish inside the MCP client's outer timeout so mutating calls fail unambiguously.
+        timeout = 230.0 if self.path == "/render" else 170.0 if self.path == "/apply" else 12.0
         result = _submit(self.path, payload, timeout)
         self._reply(200 if result.get("ok") else 400, result)
 
