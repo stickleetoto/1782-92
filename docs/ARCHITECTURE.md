@@ -4,7 +4,7 @@
 
 **Spend model tokens on 3D judgment, not tool ceremony.**
 
-1782-92 deliberately keeps the model-visible surface to three operations while allowing Blender's native Python API to remain expressive behind `apply`.
+1782-92 keeps the model-visible surface to three operations while retaining Blender's expressive Python API behind `apply`.
 
 ## Data path
 
@@ -19,49 +19,57 @@ Model
                           -> Blender main thread
 ```
 
-Blender's Python API is not thread-safe. The HTTP thread never calls `bpy`; it only parses JSON, authenticates, enqueues a job, and waits. A registered application timer drains the queue on Blender's main thread.
+The HTTP thread never calls `bpy`. It parses/authenticates/enqueues and waits. The timer drains the queue on Blender's main thread.
+
+## Module split
+
+```text
+addon/__init__.py       UI + registration only
+addon/bridge_server.py  loopback server, auth, queue, discovery state
+addon/engine.py         inspect/apply/render and Blender state tracking
+src/index.ts            three model-visible MCP tools
+src/bridge.ts           local transport client + short discovery cache
+```
+
+Keeping transport/UI separate from modeling state makes the Blender-side hot path easier to profile and change without expanding the MCP schema.
 
 ## `inspect`
 
-Default output is intentionally tiny: revision, file name, counts, active object, selection, and objects changed by the last `apply`.
+Default output is intentionally small: revision, file, type counts, active/selected short IDs, and last changed IDs. Deeper reads are opt-in:
 
-Deeper state is opt-in:
+- `q="objects"` -> `[id, name, type]`
+- `q="selection"`
+- `q="materials"`
+- `q="o17"` -> details for one object
 
-- `q="objects"`: compact `[id, name, type]` rows
-- `q="selection"`: selected object rows
-- `q="materials"`: compact material rows
-- `q="o17"`: detail for one stable object ID
-
-Object IDs are short (`o1`, `o2`, ...) and kept in bridge memory for the Blender session so the model does not need to repeatedly send long object names.
+Object short IDs are backed by Blender `ID.session_uid` when available. A reverse map makes `O("o17")` direct inside `apply`.
 
 ## `apply`
 
-`apply` accepts one batch of Blender Python. This replaces dozens of narrowly-scoped manipulation tools.
+One batch replaces dozens of narrow manipulation tools. Before execution, the extension AST-checks generated Python and exposes a reduced environment containing Blender APIs plus `O(short_id)`.
 
-Before execution the extension parses the code with Python AST and rejects imports, dangerous builtins, private attribute traversal, and file/process/network-adjacent Blender APIs. Execution receives a reduced builtin set plus `bpy`, `bmesh`, `math`, and selected `mathutils` types.
+Change tracking does not serialize a full scene fingerprint. During execution:
 
-After a successful call:
+1. depsgraph updates collect changed object/datablock owners,
+2. calls to `O()` mark referenced objects as touched,
+3. before/after runtime-ID sets detect object creation/deletion.
 
-1. Blender updates the view layer.
-2. A compact before/after scene fingerprint identifies likely changed objects.
-3. The scene revision increments.
-4. A `.blend` checkpoint is saved automatically.
-5. Only compact result metadata is returned.
+After success the scene revision increments, render cache is invalidated, and a disk checkpoint is created only when the adaptive policy says it is due.
 
-The changed-object detector is intentionally cheap and is not a forensic diff.
+A Blender undo marker is attempted before the batch. If the batch throws, one undo is attempted. This is a recovery guardrail, not a strict transaction.
 
 ## `render`
 
-`render` creates a temporary orthographic camera, frames the target geometry, and renders requested validation views. It prefers Blender Workbench for predictable, fast modeling previews. The original render settings and camera are restored afterward.
+`render` creates a temporary orthographic Workbench camera and returns PNG bytes directly as MCP image content. Default views are front + three-quarter; full turnaround is explicit.
 
-PNG bytes are returned directly as MCP image content. There is no model-visible temp-file path protocol.
+The last render is cached by `(revision, views, target IDs, size)`. Manual Blender depsgraph updates invalidate the cache so human edits do not return stale validation images.
 
 ## Discovery
 
-The Blender extension binds to `127.0.0.1` on an ephemeral port and generates a random token on each start. It writes `{host, port, token, pid, version}` into `1782-92-bridge.json` in the OS temp directory. The local MCP process reads that file on each call.
+Blender binds to `127.0.0.1` on an ephemeral port and writes `{host, port, token, pid, version}` into an OS-temp state file. The Node bridge caches valid discovery state for one second.
 
-This avoids manual port/token configuration while allowing Blender restarts without changing MCP configuration.
+Read-only calls can re-discover after transport failure. Mutating `apply` calls are never blindly retried after an ambiguous failure.
 
-## Future work
+## Future optimization rule
 
-Only add features when they reduce total model/tool round trips or improve reliability. Candidate internal improvements include better mesh change fingerprints, render overlays, transaction rollback, target collections, and compact geometry diagnostics. The external tool count should remain three unless strong evidence shows otherwise.
+Prioritize improvements that lower total model/tool round trips: better geometry diagnostics, render overlays, safer rollback, compact reference handling, and measured scene-scale benchmarks. The public tool count should remain three unless evidence strongly argues otherwise.
