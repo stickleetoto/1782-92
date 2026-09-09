@@ -109,7 +109,8 @@ function createServer(): McpServer {
   return server;
 }
 
-serveStdio(createServer).catch((error: unknown) => {
-  process.stderr.write(`[1782-92] ${error instanceof Error ? error.message : String(error)}\n`);
-  process.exitCode = 1;
+void serveStdio(createServer, {
+  onerror(error) {
+    process.stderr.write(`[1782-92] ${error.message}\n`);
+  },
 });
