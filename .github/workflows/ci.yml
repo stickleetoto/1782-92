@@ -22,5 +22,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: python -m py_compile addon/__init__.py addon/bridge_server.py addon/engine.py addon/hooks.py addon/policy.py addon/quality.py addon/references.py scripts/blender-smoke.py
+      - run: python -m py_compile addon/__init__.py addon/bridge_server.py addon/checkpoint_paths.py addon/engine.py addon/field_ops.py addon/hooks.py addon/policy.py addon/quality.py addon/references.py scripts/blender-smoke.py
       - run: python -m unittest discover -s tests -v
