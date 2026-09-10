@@ -1,6 +1,6 @@
 schema_version = "1.0.0"
 id = "p1782_92"
-version = "0.1.2"
+version = "0.1.3"
 name = "1782-92 Bridge"
 tagline = "Minimal local bridge for AI-driven Blender control"
 maintainer = "stickleetoto"
