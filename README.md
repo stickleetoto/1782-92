@@ -9,12 +9,29 @@
 | Tool | Purpose |
 |---|---|
 | `inspect` | Compact state, deep object inspection, references, measurements, quality checks, API probes |
-| `apply` | One guarded `bpy` batch with short object/reference resolvers |
+| `apply` | One guarded `bpy` batch with short resolvers and reusable modeling helpers |
 | `render` | Scene validation or direct approved-reference images |
 
 ```text
 inspect -> apply -> render -> apply -> ...
 ```
+
+## v0.1.5 crash-safe / token-budget pass
+
+v0.1.5 is driven by long real GPT-6 character-modeling sessions where giant generated Python batches could consume tens of thousands of tokens, block Blender's main thread, time out, and leave the bridge unreachable.
+
+The public MCP surface remains exactly three tools.
+
+- **Short-batch guard:** apply code is bounded by source size and AST complexity before Blender runs it.
+- **Cooperative execution deadline:** generated Python gets a 15-second budget and attempts rollback/context recovery on expiry. This cannot pre-empt one long native Blender C call, but it stops the common runaway-Python-loop failure mode.
+- **No stale queued mutation:** abandoned queued jobs are marked cancelled instead of silently executing later.
+- **Shared exec scope:** generated functions and comprehensions now share one globals/locals namespace, removing the repeated `NameError` pattern seen in real modeling traces.
+- **Reusable `M` helpers:** `M.material`, `M.mesh`, `M.tube`, `M.clump`, `M.panel`, and `M.ellipsoid` replace repeated hundreds-of-lines geometry boilerplate inside prompts.
+- **Token-bounded inspect:** large object lists, collection lists, quality reports, revision deltas, and ring profiles are compacted or sampled with follow-up hints.
+- **Recovery-first checkpoints:** successful applies taking at least two seconds checkpoint automatically, and `apply(..., checkpoint:true)` can force a recovery copy.
+- **Version mismatch signal:** a new MCP process refuses to silently drive an older Blender bridge and asks for Blender/MCP restart instead.
+
+See [docs/PRODUCTION_LOOP.md](docs/PRODUCTION_LOOP.md) for the crash-safe workflow and `M` helper vocabulary.
 
 ## v0.1.4 runtime hotfix
 
@@ -113,24 +130,36 @@ If `-BlenderVersion` is omitted, the script selects the newest numeric Blender u
 inspect()
 inspect({ q: "refs" })
 inspect({ q: "ref:r5" })
+inspect({ q: "collections" })
+inspect({ q: "collection:Speaky_Hair" })
 inspect({ q: "o3:mesh" })
 inspect({ q: "o3:bounds" })
 inspect({ q: "o3:rings" })
-inspect({ q: "collection:Speaky_Phase01_Body_Blockout" })
 inspect({ q: "quality:o3" })
 inspect({ q: "api:bpy.ops.mesh.primitive_cube_add" })
 ```
 
-`apply` exposes `bpy`, `bmesh`, `math`, common `mathutils` types, `O(short_id)`, and `REF(reference_id)`:
+`apply` exposes `bpy`, `bmesh`, `math`, common `mathutils` types, `O(short_id)`, `REF(reference_id)`, and the compact `M` modeling vocabulary:
 
 ```python
 head = O("o3")
 head.scale.z *= 1.02
 
-img = REF("r1")
+M.material("Hair", (0.95, 0.90, 0.82, 1))
+M.clump("Bang.L", [
+    (-0.03, -0.08, 1.64, 0.025, 0.012),
+    (-0.04, -0.09, 1.59, 0.020, 0.010),
+    (-0.05, -0.10, 1.55, 0.002, 0.002),
+], "Hair", "Hair")
 ```
 
-A read-only batch remains valid, but it no longer creates a false edit revision:
+For an important small mutation, force a checkpoint with the same tool rather than adding another MCP surface:
+
+```text
+apply({ code: "...", checkpoint: true })
+```
+
+A read-only batch remains valid and does not create a false edit revision:
 
 ```python
 head = O("o3")
@@ -157,16 +186,18 @@ After installing Blender or adding it to PATH:
 blender -b --python scripts/blender-smoke.py
 ```
 
-The smoke creates a cube, verifies a read-only `apply` does not advance the revision, checks bounds/rings inspection, verifies a real transform does advance the revision, runs quality checks, and returns a 128 px validation render.
+The smoke checks create/mutate/no-op behavior, the shared generated-code scope, the `M` helper path, forced recovery checkpointing, bounds/rings/quality inspection, and a 128 px render.
 
 ## Safety
 
 `apply` is a guardrail for trusted local AI clients, **not a hostile-code sandbox**. The bridge is loopback-only and authenticated. Direct arbitrary file loading remains blocked; references are exposed only from the folder explicitly selected by the user.
 
+The cooperative apply deadline can interrupt generated Python, but cannot safely pre-empt a single long native Blender C call. After any ambiguous transport failure, inspect actual state before retrying a mutation.
+
 See [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Status
 
-`v0.1.4` has passed the real Blender 5.2.1 LTS smoke that exposed the v0.1.3 transform/no-op regression, in addition to GitHub CI covering TypeScript, Python syntax, guard policy, and checkpoint path tests.
+`v0.1.5` is the crash-safe/token-budget candidate driven by real long-session GPT-6 character-modeling failures. GitHub CI covers TypeScript, Python syntax, policy budgets, checkpoint paths, and the cooperative execution budget; the real Blender smoke remains the runtime gate before treating v0.1.5 as validated.
 
 MIT licensed.
