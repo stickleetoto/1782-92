@@ -10,7 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import addon  # noqa: E402
-from addon import engine, field_ops  # noqa: E402
+from addon import engine, field_ops, runtime_guard  # noqa: E402
 
 
 def require(condition: bool, message: str) -> None:
@@ -30,14 +30,14 @@ def main() -> None:
         summary = field_ops.inspect({"q": "summary"})
         require(summary.get("ok") is True, "summary_failed")
 
-        created = field_ops.apply({"code": 'bpy.ops.mesh.primitive_cube_add(size=2)\no=bpy.context.object\no.name="SmokeCube"'})
+        created = runtime_guard.apply({"code": 'bpy.ops.mesh.primitive_cube_add(size=2)\no=bpy.context.object\no.name="SmokeCube"'})
         require(created.get("ok") is True and created.get("rev") == 1, f"apply_create_failed:{created}")
 
         objects = field_ops.inspect({"q": "objects"}).get("objects", [])
         cube_id = next((row[0] for row in objects if row[1] == "SmokeCube"), None)
         require(isinstance(cube_id, str), "cube_id_missing")
 
-        noop = field_ops.apply({"code": f'o=O("{cube_id}")\nprint(o.name, tuple(o.dimensions))'})
+        noop = runtime_guard.apply({"code": f'o=O("{cube_id}")\nprint(o.name, tuple(o.dimensions))'})
         require(noop.get("ok") is True and noop.get("rev") == 1 and noop.get("noop") == 1, f"noop_revision_failed:{noop}")
 
         bounds = field_ops.inspect({"q": f"{cube_id}:bounds"})
@@ -46,8 +46,9 @@ def main() -> None:
         rings = field_ops.inspect({"q": f"{cube_id}:rings"})
         require(rings.get("ok") is True and len(rings.get("rings", [])) >= 2, f"rings_failed:{rings}")
 
-        moved = field_ops.apply({"code": f'O("{cube_id}").location.x = 1.25'})
-        require(moved.get("ok") is True and moved.get("rev") == 2, f"apply_resolver_failed:{moved}")
+        moved = runtime_guard.apply({"code": f'O("{cube_id}").location.x = 1.25'})
+        require(moved.get("ok") is True and moved.get("rev") == 2 and moved.get("noop") is None, f"apply_resolver_failed:{moved}")
+        require(abs(bpy.data.objects["SmokeCube"].location.x - 1.25) < 1e-6, "transform_not_applied")
 
         deep = field_ops.inspect({"q": f"{cube_id}:mesh"})
         require(deep.get("mesh", {}).get("v") == 8, f"deep_inspect_failed:{deep}")
