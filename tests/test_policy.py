@@ -21,6 +21,21 @@ class PolicyTests(unittest.TestCase):
         tree = validate_code('o = O("o1")\no.scale.z *= 1.1\nbpy.ops.mesh.primitive_cube_add(size=2)')
         self.assertIsNotNone(tree)
 
+    def test_allows_compact_modeling_helpers(self) -> None:
+        tree = validate_code('M.ellipsoid("Head", (0,0,1), (.1,.08,.12), "Body", "Skin")')
+        self.assertIsNotNone(tree)
+
+    def test_blocks_oversized_generated_batch(self) -> None:
+        # One syntactically-valid statement whose payload alone exceeds the
+        # byte budget, so this exercises size before AST-complexity limits.
+        code = 'x = "' + ("a" * (POLICY.MAX_CODE_BYTES + 1)) + '"'
+        self.assert_blocked(code, "batch_too_large")
+
+    def test_blocks_overcomplex_generated_batch(self) -> None:
+        code = "\n".join(f"x{i} = {i}" for i in range(500))
+        self.assertLess(len(code.encode("utf-8")), POLICY.MAX_CODE_BYTES)
+        self.assert_blocked(code, "batch_too_complex")
+
     def test_blocks_imports(self) -> None:
         self.assert_blocked("import os", "import_blocked")
 

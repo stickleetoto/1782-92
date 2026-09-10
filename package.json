@@ -1,6 +1,6 @@
 {
   "name": "p1782-92",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "type": "module",
   "description": "Minimal token-efficient control layer for AI-driven 3D tools.",

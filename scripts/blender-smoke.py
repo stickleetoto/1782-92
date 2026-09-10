@@ -40,6 +40,12 @@ def main() -> None:
         noop = runtime_guard.apply({"code": f'o=O("{cube_id}")\nprint(o.name, tuple(o.dimensions))'})
         require(noop.get("ok") is True and noop.get("rev") == 1 and noop.get("noop") == 1, f"noop_revision_failed:{noop}")
 
+        # v0.1.5 uses one globals/locals namespace. Generated helper functions can
+        # see variables and sibling definitions without the old NameError retry loop.
+        scoped = runtime_guard.apply({"code": 'value=7\ndef f():\n return value\nprint(f())'})
+        require(scoped.get("ok") is True and scoped.get("noop") == 1, f"shared_scope_failed:{scoped}")
+        require(scoped.get("out") == "7", f"shared_scope_output_failed:{scoped}")
+
         bounds = field_ops.inspect({"q": f"{cube_id}:bounds"})
         require(bounds.get("ok") is True and len(bounds.get("bounds", [])) == 2, f"bounds_failed:{bounds}")
 
@@ -49,6 +55,14 @@ def main() -> None:
         moved = runtime_guard.apply({"code": f'O("{cube_id}").location.x = 1.25'})
         require(moved.get("ok") is True and moved.get("rev") == 2 and moved.get("noop") is None, f"apply_resolver_failed:{moved}")
         require(abs(bpy.data.objects["SmokeCube"].location.x - 1.25) < 1e-6, "transform_not_applied")
+
+        helper = runtime_guard.apply({
+            "code": 'M.material("SmokeMat",(0.8,0.4,0.2,1))\nM.ellipsoid("HelperBall",(0,0,0.5),(0.2,0.15,0.25),"SmokeHelpers","SmokeMat")',
+            "checkpoint": True,
+        })
+        require(helper.get("ok") is True and helper.get("rev") == 3, f"helper_apply_failed:{helper}")
+        require(helper.get("checkpoint"), f"forced_checkpoint_failed:{helper}")
+        require(bpy.data.objects.get("HelperBall") is not None, "helper_object_missing")
 
         deep = field_ops.inspect({"q": f"{cube_id}:mesh"})
         require(deep.get("mesh", {}).get("v") == 8, f"deep_inspect_failed:{deep}")

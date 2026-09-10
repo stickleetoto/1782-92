@@ -10,11 +10,16 @@ from typing import Any
 
 import bpy
 
-from . import checkpoint_paths, engine, references
+from . import checkpoint_paths, engine, execution_budget, modeling, references
 
 MAX_DIRECT_REFERENCE_BYTES = 16 * 1024 * 1024
 MAX_RING_VERTICES = 100_000
-MAX_RINGS = 64
+MAX_RINGS = 16
+MAX_OBJECT_ROWS = 32
+MAX_COLLECTION_ROWS = 32
+MAX_CHANGED_IDS = 24
+MAX_QUALITY_DETAILS = 12
+SLOW_APPLY_CHECKPOINT_MS = 2_000
 
 _MIME_BY_SUFFIX = {
     ".png": "image/png",
@@ -29,6 +34,21 @@ _MIME_BY_SUFFIX = {
 
 def _compact(value: float) -> float:
     return round(float(value), 5)
+
+
+def _sample_rows(rows: list[Any], limit: int) -> list[Any]:
+    if len(rows) <= limit:
+        return rows
+    if limit <= 1:
+        return rows[:1]
+    indexes = sorted({round(index * (len(rows) - 1) / (limit - 1)) for index in range(limit)})
+    return [rows[index] for index in indexes]
+
+
+def _put_limited(reply: dict[str, Any], key: str, values: list[Any], limit: int) -> None:
+    reply[key] = values[:limit]
+    if len(values) > limit:
+        reply[f"{key}_more"] = len(values) - limit
 
 
 def _object_structure() -> dict[int, tuple[Any, ...]]:
@@ -68,6 +88,14 @@ def _collection_signature() -> tuple[tuple[Any, ...], ...]:
 def _scene_meta_signature() -> tuple[tuple[str, str], ...]:
     scene = bpy.context.scene
     return tuple(sorted((str(key), repr(value)[:256]) for key, value in scene.items()))
+
+
+def _non_object_signature() -> tuple[tuple[Any, ...], tuple[Any, ...]]:
+    # Do not include images: REF() may safely load an approved reference during a
+    # read-only batch and that must not create a false edit revision.
+    materials = tuple(sorted((engine._uid(mat), mat.name) for mat in bpy.data.materials))
+    node_groups = tuple(sorted((engine._uid(group), group.name, group.bl_idname) for group in bpy.data.node_groups))
+    return materials, node_groups
 
 
 def _checkpoint(rev: int) -> str | None:
@@ -121,6 +149,7 @@ def apply(payload: dict[str, Any]) -> dict[str, Any]:
     before_structure = _object_structure()
     before_collections = _collection_signature()
     before_scene_meta = _scene_meta_signature()
+    before_non_object = _non_object_signature()
 
     engine._build_owner_index()
     engine._DIRTY_UIDS.clear()
@@ -139,13 +168,17 @@ def apply(payload: dict[str, Any]) -> dict[str, Any]:
         "Quaternion": engine.Quaternion,
         "O": engine._object,
         "REF": engine._reference,
+        "M": modeling.M,
     }
 
     try:
         compiled = compile(tree, "<1782-92.apply>", "exec")
         engine._TRACKING = True
         with contextlib.redirect_stdout(output):
-            exec(compiled, env, {})
+            with execution_budget.deadline():
+                # One shared namespace fixes Python's exec(globals, locals) scoping
+                # trap for generated helper functions and comprehensions.
+                exec(compiled, env, env)
         bpy.context.view_layer.update()
         engine._object_mode()
     except Exception as exc:
@@ -153,9 +186,11 @@ def apply(payload: dict[str, Any]) -> dict[str, Any]:
         rolled_back = engine._rollback_once() if undo_ready else False
         engine._refresh_ids()
         engine._restore_context(context_before)
+        suffix = ":rb" if rolled_back else ""
+        if isinstance(exc, execution_budget.ApplyBudgetExceeded):
+            return {"ok": False, "error": f"apply_budget_exceeded:split_batch{suffix}"}
         line = engine._error_location(exc)
         where = f"@{line}" if line is not None else ""
-        suffix = ":rb" if rolled_back else ""
         return {"ok": False, "error": f"{type(exc).__name__}{where}:{exc}{suffix}"}
     finally:
         engine._TRACKING = False
@@ -164,6 +199,7 @@ def apply(payload: dict[str, Any]) -> dict[str, Any]:
     after_structure = _object_structure()
     after_collections = _collection_signature()
     after_scene_meta = _scene_meta_signature()
+    after_non_object = _non_object_signature()
 
     created = after_uids - before_uids
     removed = before_uids - after_uids
@@ -179,6 +215,7 @@ def apply(payload: dict[str, Any]) -> dict[str, Any]:
     structural_scene_change = (
         before_collections != after_collections
         or before_scene_meta != after_scene_meta
+        or before_non_object != after_non_object
     )
     mutated = bool(changed_uids or removed or structural_scene_change)
     engine._refresh_ids(prune=True)
@@ -204,8 +241,11 @@ def apply(payload: dict[str, Any]) -> dict[str, Any]:
 
     reply = {"ok": True, "rev": engine._REV}
     if engine._LAST_CHANGED:
-        reply["changed"] = engine._LAST_CHANGED
-    checkpoint = _checkpoint_if_due(engine._REV)
+        _put_limited(reply, "changed", engine._LAST_CHANGED, MAX_CHANGED_IDS)
+    if payload.get("checkpoint") is True or elapsed >= SLOW_APPLY_CHECKPOINT_MS:
+        checkpoint = _checkpoint(engine._REV)
+    else:
+        checkpoint = _checkpoint_if_due(engine._REV)
     if checkpoint:
         reply["checkpoint"] = checkpoint
     if elapsed >= 10:
@@ -331,29 +371,94 @@ def _rings(object_id: str) -> dict[str, Any]:
                 _compact(max(point.y for point in points)),
             ]
         )
-    reply: dict[str, Any] = {"ok": True, "rev": engine._REV, "id": object_id, "rings": rows[:MAX_RINGS]}
-    if len(rows) > MAX_RINGS:
-        reply["more"] = len(rows) - MAX_RINGS
+    sampled = _sample_rows(rows, MAX_RINGS)
+    reply: dict[str, Any] = {"ok": True, "rev": engine._REV, "id": object_id, "rings": sampled}
+    if len(rows) > len(sampled):
+        reply["rings_total"] = len(rows)
+        reply["rings_more"] = len(rows) - len(sampled)
+    return reply
+
+
+def _objects_info() -> dict[str, Any]:
+    engine._refresh_ids()
+    objects = sorted(bpy.context.scene.objects, key=lambda obj: (obj.name.casefold(), obj.type))
+    rows = [[engine._id_for(obj), obj.name, obj.type] for obj in objects[:MAX_OBJECT_ROWS]]
+    reply: dict[str, Any] = {"ok": True, "rev": engine._REV, "count": len(objects), "objects": rows}
+    if len(objects) > MAX_OBJECT_ROWS:
+        reply["more"] = len(objects) - MAX_OBJECT_ROWS
+        reply["hint"] = "use collections/collection:NAME"
     return reply
 
 
 def _collection_info(name: str) -> dict[str, Any]:
     if not name:
-        return {
-            "ok": True,
-            "rev": engine._REV,
-            "collections": [[collection.name, len(collection.objects)] for collection in bpy.data.collections[:128]],
-        }
+        rows = [[collection.name, len(collection.objects)] for collection in bpy.data.collections]
+        reply: dict[str, Any] = {"ok": True, "rev": engine._REV, "collections": rows[:64]}
+        if len(rows) > 64:
+            reply["more"] = len(rows) - 64
+        return reply
     collection = bpy.data.collections.get(name)
     if collection is None:
         return {"ok": False, "error": "collection_not_found"}
     engine._refresh_ids()
-    rows = [[engine._id_for(obj), obj.name, obj.type] for obj in collection.objects[:128]]
-    return {"ok": True, "rev": engine._REV, "collection": name, "count": len(collection.objects), "objects": rows}
+    objects = sorted(collection.objects, key=lambda obj: (obj.name.casefold(), obj.type))
+    rows = [[engine._id_for(obj), obj.name, obj.type] for obj in objects[:MAX_COLLECTION_ROWS]]
+    reply = {"ok": True, "rev": engine._REV, "collection": name, "count": len(objects), "objects": rows}
+    if len(objects) > MAX_COLLECTION_ROWS:
+        reply["more"] = len(objects) - MAX_COLLECTION_ROWS
+    return reply
+
+
+def _quality_info() -> dict[str, Any]:
+    result = engine.inspect({"q": "quality"})
+    issues = result.get("issues")
+    if not isinstance(issues, dict) or len(issues) <= MAX_QUALITY_DETAILS:
+        return result
+
+    code_counts: dict[str, int] = {}
+    ranked: list[tuple[str, list[str]]] = []
+    for object_id, warnings in issues.items():
+        if not isinstance(warnings, list):
+            continue
+        normalized = [str(value) for value in warnings]
+        for warning in normalized:
+            code = warning.split(":", 1)[0]
+            code_counts[code] = code_counts.get(code, 0) + 1
+        ranked.append((str(object_id), normalized))
+
+    # Put actionable warnings ahead of the common UV0-only case.
+    ranked.sort(key=lambda item: (all(value == "UV0" for value in item[1]), item[0]))
+    sample = [[object_id, warnings] for object_id, warnings in ranked[:MAX_QUALITY_DETAILS]]
+    return {
+        "ok": True,
+        "rev": result.get("rev", engine._REV),
+        "checked": result.get("checked", 0),
+        "issue_objects": len(issues),
+        "codes": [[code, count] for code, count in sorted(code_counts.items())],
+        "sample": sample,
+        "more": max(0, len(issues) - len(sample)),
+        "hint": "use quality:oN for full object detail",
+    }
+
+
+def _summary_info() -> dict[str, Any]:
+    reply = engine.inspect({"q": "summary"})
+    for key in ("selected", "changed"):
+        values = reply.get(key)
+        if isinstance(values, list) and len(values) > MAX_CHANGED_IDS:
+            reply[key] = values[:MAX_CHANGED_IDS]
+            reply[f"{key}_more"] = len(values) - MAX_CHANGED_IDS
+    return reply
 
 
 def inspect(payload: dict[str, Any]) -> dict[str, Any]:
     q = str(payload.get("q") or "summary")
+    if q == "summary":
+        return _summary_info()
+    if q == "objects":
+        return _objects_info()
+    if q == "quality":
+        return _quality_info()
     if q.startswith("ref:"):
         return _reference_info(q[4:])
     if q.startswith("refs:r"):
