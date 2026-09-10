@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import ast
 
-MAX_CODE_BYTES = 65_536
+# The bridge is deliberately optimized for short, reviewable modeling batches.
+# Bigger generated programs waste model context and are harder to recover safely.
+MAX_CODE_BYTES = 24_576
+MAX_AST_NODES = 1_200
 
 BANNED_NAMES = {
     "__import__", "breakpoint", "compile", "delattr", "eval", "exec", "getattr",
@@ -33,14 +36,19 @@ def _chain(node: ast.AST) -> str:
 
 
 def validate_code(code: str) -> ast.AST:
-    if len(code.encode("utf-8")) > MAX_CODE_BYTES:
-        raise ValueError("code_too_large")
+    size = len(code.encode("utf-8"))
+    if size > MAX_CODE_BYTES:
+        raise ValueError(f"batch_too_large:{size}>{MAX_CODE_BYTES}:split_batch")
     try:
         tree = ast.parse(code, mode="exec")
     except SyntaxError as exc:
         raise ValueError(f"syntax@{exc.lineno}:{exc.offset}:{exc.msg}") from exc
 
-    for node in ast.walk(tree):
+    nodes = list(ast.walk(tree))
+    if len(nodes) > MAX_AST_NODES:
+        raise ValueError(f"batch_too_complex:{len(nodes)}>{MAX_AST_NODES}:split_batch")
+
+    for node in nodes:
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             raise ValueError("import_blocked")
         if isinstance(node, ast.Name) and node.id in BANNED_NAMES:
