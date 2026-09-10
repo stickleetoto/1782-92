@@ -3,7 +3,7 @@ import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import * as z from 'zod/v4';
 import { callBridge, type BridgeReply } from './bridge.js';
 
-const VERSION = '0.1.5';
+const VERSION = '0.1.6';
 
 function compact(value: BridgeReply): Record<string, unknown> {
   const { ok: _ok, ...rest } = value;
@@ -34,7 +34,7 @@ function createServer(): McpServer {
   server.registerTool(
     'inspect',
     {
-      description: 'Compact state. Prefer summary, collections/collection:NAME and targeted oN queries; global objects/quality and rings are token-bounded. q=summary|objects|selection|materials|refs|ref:rN|quality|quality:oN|oN[:mesh|uv|mat|rig|bounds|rings]|collections|collection:NAME|api:bpy.ops.*.',
+      description: 'Compact state. status is a queue-bypassing health probe. Scene intelligence: tree, find:TERM, oN:spatial. Also summary|objects|selection|materials|refs|ref:rN|quality|quality:oN|oN[:mesh|uv|mat|rig|bounds|rings]|collections|collection:NAME|api:bpy.ops.*.',
       inputSchema: z.object({ q: z.string().max(128).optional() }),
       annotations: { readOnlyHint: true, idempotentHint: true },
     },
@@ -69,12 +69,12 @@ function createServer(): McpServer {
   server.registerTool(
     'render',
     {
-      description: 'Validation images. Prefer 512-768 during iteration; 1024 for final review. Scene: fast/lookdev/wire. Reference: ref=rN or refs=[rN..] returns approved source images directly.',
+      description: 'Validation images. fast/lookdev/wire are controlled scene views; viewport captures the current visible 3D editor (GUI only). Reference ref=rN or refs=[rN..] returns approved source images directly.',
       inputSchema: z.object({
         views: z.array(z.enum(['front', 'side', 'back', 'three_quarter'])).max(4).optional(),
         ids: z.array(z.string().regex(/^o\d+$/)).max(128).optional(),
         size: z.number().int().min(128).max(1024).optional(),
-        mode: z.enum(['fast', 'lookdev', 'wire']).optional(),
+        mode: z.enum(['fast', 'lookdev', 'wire', 'viewport']).optional(),
         ref: z.string().regex(/^r\d+$/).optional(),
         refs: z.array(z.string().regex(/^r\d+$/)).min(1).max(4).optional(),
       }),

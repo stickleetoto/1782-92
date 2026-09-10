@@ -40,8 +40,6 @@ def main() -> None:
         noop = runtime_guard.apply({"code": f'o=O("{cube_id}")\nprint(o.name, tuple(o.dimensions))'})
         require(noop.get("ok") is True and noop.get("rev") == 1 and noop.get("noop") == 1, f"noop_revision_failed:{noop}")
 
-        # v0.1.5 uses one globals/locals namespace. Generated helper functions can
-        # see variables and sibling definitions without the old NameError retry loop.
         scoped = runtime_guard.apply({"code": 'value=7\ndef f():\n return value\nprint(f())'})
         require(scoped.get("ok") is True and scoped.get("noop") == 1, f"shared_scope_failed:{scoped}")
         require(scoped.get("out") == "7", f"shared_scope_output_failed:{scoped}")
@@ -57,12 +55,23 @@ def main() -> None:
         require(abs(bpy.data.objects["SmokeCube"].location.x - 1.25) < 1e-6, "transform_not_applied")
 
         helper = runtime_guard.apply({
-            "code": 'M.material("SmokeMat",(0.8,0.4,0.2,1))\nM.ellipsoid("HelperBall",(0,0,0.5),(0.2,0.15,0.25),"SmokeHelpers","SmokeMat")',
+            "code": 'M.material("SmokeMat",(0.8,0.4,0.2,1))\nM.ellipsoid("HelperBall",(2.5,0,0.5),(0.2,0.15,0.25),"SmokeHelpers","SmokeMat")',
             "checkpoint": True,
         })
         require(helper.get("ok") is True and helper.get("rev") == 3, f"helper_apply_failed:{helper}")
         require(helper.get("checkpoint"), f"forced_checkpoint_failed:{helper}")
         require(bpy.data.objects.get("HelperBall") is not None, "helper_object_missing")
+
+        tree = runtime_guard.dispatch("/inspect", {"q": "tree"})
+        require(tree.get("ok") is True and tree.get("count", 0) >= 2, f"tree_failed:{tree}")
+
+        found = runtime_guard.dispatch("/inspect", {"q": "find:Helper"})
+        matches = found.get("matches", [])
+        require(found.get("ok") is True and any(row[1] == "HelperBall" for row in matches), f"find_failed:{found}")
+
+        spatial = runtime_guard.dispatch("/inspect", {"q": f"{cube_id}:spatial"})
+        near = spatial.get("near", [])
+        require(spatial.get("ok") is True and any(row[1] == "HelperBall" for row in near), f"spatial_failed:{spatial}")
 
         deep = field_ops.inspect({"q": f"{cube_id}:mesh"})
         require(deep.get("mesh", {}).get("v") == 8, f"deep_inspect_failed:{deep}")
@@ -73,6 +82,10 @@ def main() -> None:
         rendered = field_ops.render({"views": ["front"], "size": 128, "mode": "fast", "ids": [cube_id]})
         images = rendered.get("images", [])
         require(rendered.get("ok") is True and len(images) == 1 and len(images[0].get("data", "")) > 100, "render_failed")
+
+        viewport = runtime_guard.dispatch("/render", {"mode": "viewport"})
+        if bpy.app.background:
+            require(viewport.get("error") == "viewport_unavailable:background", f"viewport_background_failed:{viewport}")
 
         print("1782-92 blender smoke: PASS")
     finally:

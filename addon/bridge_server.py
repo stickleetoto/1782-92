@@ -6,6 +6,7 @@ import queue
 import secrets
 import tempfile
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -14,19 +15,44 @@ import bpy
 
 from . import engine, hooks, runtime_guard
 
-VERSION = "0.1.5"
+VERSION = "0.1.6"
 STATE_PATH = Path(tempfile.gettempdir()) / "1782-92-bridge.json"
 MAX_PENDING_JOBS = 4
+BLENDER_VERSION = ".".join(str(value) for value in bpy.app.version)
+BACKGROUND = bool(bpy.app.background)
 
 _SERVER: ThreadingHTTPServer | None = None
 _SERVER_THREAD: threading.Thread | None = None
 _TOKEN: str | None = None
 _QUEUE: queue.Queue[dict[str, Any]] = queue.Queue()
 _RUNNING = False
+_ACTIVE_JOB: dict[str, Any] | None = None
+_STARTED_AT = 0.0
 
 
 def is_running() -> bool:
     return _RUNNING
+
+
+def _status_reply() -> dict[str, Any]:
+    reply: dict[str, Any] = {
+        "ok": True,
+        "rev": engine._REV,
+        "bridge": VERSION,
+        "blender": BLENDER_VERSION,
+        "bg": int(BACKGROUND),
+        "pid": os.getpid(),
+        "queued": _QUEUE.qsize(),
+    }
+    if _STARTED_AT:
+        reply["up_s"] = round(max(0.0, time.monotonic() - _STARTED_AT), 1)
+    active = _ACTIVE_JOB
+    if active is not None:
+        reply["busy"] = str(active.get("path") or "").lstrip("/")
+        started = active.get("started_at")
+        if isinstance(started, (int, float)):
+            reply["busy_ms"] = round(max(0.0, time.monotonic() - float(started)) * 1000)
+    return reply
 
 
 def _cancel_job(job: dict[str, Any]) -> None:
@@ -46,6 +72,7 @@ def _drain_queue() -> None:
 
 
 def _pump() -> float | None:
+    global _ACTIVE_JOB
     if not _RUNNING:
         return None
     for _ in range(4):
@@ -59,15 +86,18 @@ def _pump() -> float | None:
             event.set()
             continue
         job["started"] = True
+        job["started_at"] = time.monotonic()
         if job.get("cancelled"):
             job["result"] = {"ok": False, "error": "job_cancelled"}
             event.set()
             continue
+        _ACTIVE_JOB = job
         try:
             job["result"] = runtime_guard.dispatch(job["path"], job["payload"])
         except Exception as exc:
             job["result"] = {"ok": False, "error": f"internal:{type(exc).__name__}:{exc}"}
         finally:
+            _ACTIVE_JOB = None
             event.set()
     return 0.03
 
@@ -82,6 +112,7 @@ def _submit(path: str, payload: dict[str, Any], timeout: float) -> dict[str, Any
         "event": event,
         "result": None,
         "started": False,
+        "started_at": None,
         "cancelled": False,
     }
     _QUEUE.put(job)
@@ -94,7 +125,7 @@ def _submit(path: str, payload: dict[str, Any], timeout: float) -> dict[str, Any
 
 
 class _Handler(BaseHTTPRequestHandler):
-    server_version = "1782-92/0.1.5"
+    server_version = "1782-92/0.1.6"
 
     def log_message(self, _format: str, *_args: Any) -> None:
         return
@@ -118,6 +149,13 @@ class _Handler(BaseHTTPRequestHandler):
                 raise ValueError
         except Exception:
             self._reply(400, {"ok": False, "error": "bad_json"})
+            return
+
+        # Status deliberately bypasses Blender's main-thread queue. If an apply or
+        # render is currently wedged, the client can still learn that the bridge is
+        # alive, what is busy, and how deep the queue is.
+        if self.path == "/inspect" and payload.get("q") == "status":
+            self._reply(200, _status_reply())
             return
 
         # apply has an internal cooperative Python deadline. Keep the transport
@@ -153,7 +191,7 @@ def _write_state(port: int) -> None:
 
 
 def start_bridge() -> tuple[bool, str]:
-    global _SERVER, _SERVER_THREAD, _TOKEN, _RUNNING
+    global _SERVER, _SERVER_THREAD, _TOKEN, _RUNNING, _STARTED_AT
     if _RUNNING:
         return True, "already_running"
     try:
@@ -162,6 +200,7 @@ def start_bridge() -> tuple[bool, str]:
         _SERVER = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
         _SERVER.daemon_threads = True
         _RUNNING = True
+        _STARTED_AT = time.monotonic()
         engine.reset_session()
         hooks.install()
         if not bpy.app.timers.is_registered(_pump):
@@ -172,13 +211,16 @@ def start_bridge() -> tuple[bool, str]:
         return True, f"127.0.0.1:{_SERVER.server_address[1]}"
     except Exception as exc:
         _RUNNING = False
+        _STARTED_AT = 0.0
         hooks.remove()
         return False, f"{type(exc).__name__}:{exc}"
 
 
 def stop_bridge() -> None:
-    global _SERVER, _SERVER_THREAD, _TOKEN, _RUNNING
+    global _SERVER, _SERVER_THREAD, _TOKEN, _RUNNING, _ACTIVE_JOB, _STARTED_AT
     _RUNNING = False
+    _ACTIVE_JOB = None
+    _STARTED_AT = 0.0
     hooks.remove()
     _drain_queue()
     if _SERVER is not None:

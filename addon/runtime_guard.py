@@ -4,7 +4,7 @@ from typing import Any
 
 import bpy
 
-from . import engine, field_ops
+from . import engine, field_ops, scene_intel
 
 
 def _transform_signature(obj: bpy.types.Object) -> tuple[Any, ...]:
@@ -76,4 +76,12 @@ def apply(payload: dict[str, Any]) -> dict[str, Any]:
 def dispatch(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     if path == "/apply":
         return apply(payload)
+    if path == "/inspect":
+        reply = scene_intel.inspect(payload)
+        if reply is not None:
+            return reply
+    if path == "/render":
+        reply = scene_intel.render(payload)
+        if reply is not None:
+            return reply
     return field_ops.dispatch(path, payload)
