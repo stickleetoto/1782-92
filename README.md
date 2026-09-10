@@ -66,6 +66,34 @@ In Blender: **Edit -> Preferences -> Get Extensions -> Install from Disk**. Inst
 
 For image references, choose the approved folder in the **Refs** field in the same panel.
 
+### Windows development link
+
+When actively developing 1782-92, the repository `addon` directory can be linked directly into Blender's user extension directory. This removes the repeated build-ZIP-install cycle.
+
+Save your `.blend` work and close Blender first, then run from the repository root:
+
+```powershell
+.\scripts\link-addon-dev.ps1 -BlenderVersion 5.2
+```
+
+The script backs up an existing packaged `p1782_92` install and creates a Windows directory junction from Blender's extension directory to this repository's `addon` folder.
+
+After the one-time setup, future source updates are simply:
+
+```powershell
+git pull
+```
+
+Restart Blender after pulling so the Python modules are reloaded. No add-on ZIP rebuild is needed for normal source iteration.
+
+To leave development-link mode and restore the previous packaged install:
+
+```powershell
+.\scripts\link-addon-dev.ps1 -BlenderVersion 5.2 -Remove
+```
+
+If `-BlenderVersion` is omitted, the script selects the newest numeric Blender user-config directory it can find. The script refuses to change the extension directory while Blender is running.
+
 ## MCP host
 
 ```json
@@ -139,6 +167,6 @@ See [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Status
 
-`v0.1.4` is a runtime-hotfix candidate after a real Blender 5.2.1 smoke exposed the transform/no-op regression in v0.1.3. GitHub CI covers TypeScript, Python syntax, guard policy, and checkpoint path tests; rerun the real Blender smoke before treating the hotfix as validated.
+`v0.1.4` has passed the real Blender 5.2.1 LTS smoke that exposed the v0.1.3 transform/no-op regression, in addition to GitHub CI covering TypeScript, Python syntax, guard policy, and checkpoint path tests.
 
 MIT licensed.
