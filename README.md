@@ -8,29 +8,30 @@
 
 | Tool | Purpose |
 |---|---|
-| `inspect` | Read compact scene state or one short object ID |
-| `apply` | Execute one guarded `bpy` batch; `O("o7")` resolves short IDs |
-| `render` | Return fast orthographic validation PNGs for visual self-review |
+| `inspect` | Compact state, deep object inspection, references, quality checks, API probes |
+| `apply` | One guarded `bpy` batch with short object/reference resolvers |
+| `render` | Fast, lookdev, or wire validation PNGs |
 
 ```text
 inspect -> apply -> render -> apply -> ...
 ```
 
-## v0.1.1 optimization pass
+## v0.1.2 production-loop pass
 
-The public API is still exactly three tools. Internally v0.1.1 reduces repeated work:
+The external tool count is still exactly three. Internally v0.1.2 adds the missing pieces for longer modeling sessions:
 
-- Blender `session_uid` backs short stable object IDs when available.
-- `O("oN")` gives generated code direct short-ID object access instead of repeating long names.
-- Depsgraph updates + touched IDs replace expensive full-scene geometry fingerprints around every `apply`.
-- Disk checkpoints are adaptive: first edit, then every 5 revisions or 3 minutes, rather than every edit.
-- A best-effort Blender undo marker is pushed before `apply`; failed batches attempt one rollback.
-- Default validation is two views (`front`, `three_quarter`); side/back are opt-in.
-- Identical renders at the same revision are cached in memory.
-- MCP success results are emitted once as compact JSON instead of duplicating text + structured output.
-- The Node bridge caches discovery state briefly and never retries a mutating `apply` after an ambiguous transport failure.
+- **Reference workspace:** user chooses one folder; `inspect("refs")` returns `rN` IDs and `REF("rN")` safely loads only those images.
+- **Deep inspect:** `oN:mesh`, `oN:uv`, `oN:mat`, and `oN:rig` expose detail only when requested.
+- **Production validator:** `inspect("quality")` checks common topology/UV/material/rigging problems with compact warning codes.
+- **Context guard:** each `apply` starts/ends in Object mode; failed batches attempt undo and best-effort context restoration.
+- **Three render modes:** `fast`, `lookdev`, and `wire`, still behind the single `render` tool.
+- **Current-Blender API probe:** `inspect("api:bpy.ops...")` returns compact RNA operator arguments to reduce stale-API retries.
+- **External-edit signal:** `inspect("summary")` includes `ext:1` once after Blender changed outside an `apply` call.
+- **Guard policy unit tests** plus a real-Blender headless smoke script.
 
-See [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+v0.1.1 optimizations remain: `session_uid`-backed short IDs, `O("oN")`, depsgraph dirty tracking, adaptive checkpoints, compact MCP results, render caching, and no blind replay of mutating calls.
+
+See [docs/PRODUCTION_LOOP.md](docs/PRODUCTION_LOOP.md) and [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 ## Requirements
 
@@ -39,26 +40,17 @@ See [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 ## Install
 
-### 1. MCP server
-
 ```powershell
 npm install
 npm run check
-```
-
-### 2. Blender extension
-
-```powershell
 .\scripts\build-addon.ps1
 ```
 
-In Blender: **Edit -> Preferences -> Get Extensions -> Install from Disk** and select the generated ZIP. Enable **1782-92 Bridge**.
+In Blender: **Edit -> Preferences -> Get Extensions -> Install from Disk**. Install the generated ZIP, enable **1782-92 Bridge**, then open **3D View -> N -> 1782-92** and press **Start**.
 
-Open the 3D View sidebar (`N`) -> **1782-92** -> **Start**.
+For image references, choose the approved folder in the **Refs** field in the same panel.
 
-Blender binds to `127.0.0.1` on an ephemeral port and writes a short-lived authenticated connection file into the OS temp directory. No manual port/token setup is required.
-
-### 3. Add to an MCP host
+## MCP host
 
 ```json
 {
@@ -71,76 +63,51 @@ Blender binds to `127.0.0.1` on an ephemeral port and writes a short-lived authe
 }
 ```
 
-Exact configuration placement depends on the MCP host.
-
-## Tool usage
+## Compact usage
 
 ```text
 inspect()
-inspect({ q: "objects" })
-inspect({ q: "o3" })
+inspect({ q: "refs" })
+inspect({ q: "o3:mesh" })
+inspect({ q: "quality:o3" })
+inspect({ q: "api:bpy.ops.mesh.primitive_cube_add" })
 ```
 
-`apply` receives one Python batch. Imports are intentionally unnecessary and blocked. The execution environment exposes `bpy`, `bmesh`, `math`, common `mathutils` types, and `O(short_id)`.
+`apply` exposes `bpy`, `bmesh`, `math`, common `mathutils` types, `O(short_id)`, and `REF(reference_id)`:
 
 ```python
 head = O("o3")
 head.scale.z *= 1.02
+
+img = REF("r1")
 ```
 
-Or create new geometry directly:
-
-```python
-bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16, location=(0, 0, 1.7))
-obj = bpy.context.active_object
-obj.name = "Head_Blockout"
-obj.scale = (0.55, 0.48, 0.62)
-```
-
-Fast validation:
+Validation:
 
 ```text
 render()
+render({ mode: "wire", ids: ["o3"] })
+render({ mode: "lookdev", views: ["front", "side", "back", "three_quarter"] })
 ```
 
-Full turnaround when needed:
+## Real Blender smoke
 
-```text
-render({ views: ["front", "side", "back", "three_quarter"] })
+After installing Blender or adding it to PATH:
+
+```powershell
+blender -b --python scripts/blender-smoke.py
 ```
 
-`render` returns actual PNG image content, not model-visible temp paths.
+The smoke creates a cube, resolves it by `O("oN")`, deep-inspects it, runs quality checks, and returns a 128 px validation render.
 
-## Safety model
+## Safety
 
-`apply` is **not a hostile-code sandbox**. It is a guardrail for trusted local AI clients. Imports, common dynamic execution/file APIs, private attribute traversal, and sensitive Blender APIs are blocked; the bridge is loopback-only and authenticated with a per-run random token.
-
-The v0.1.1 rollback is best-effort, not a transactional guarantee. Keep valuable `.blend` work under normal backups/versioned storage.
+`apply` is a guardrail for trusted local AI clients, **not a hostile-code sandbox**. The bridge is loopback-only and authenticated. Direct file loading remains blocked; references are exposed only from the folder explicitly selected by the user.
 
 See [docs/SECURITY.md](docs/SECURITY.md).
 
-## Architecture
-
-```text
-MCP host / model
-      |
-      | stdio: inspect / apply / render
-      v
-1782-92 MCP server
-      |
-      | authenticated loopback HTTP
-      v
-Blender extension
-      |
-      | queue + bpy.app.timers
-      v
-Blender main thread / bpy
-```
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
 ## Status
 
-`v0.1.1` is an experimental performance foundation aimed at repeated agent-driven modeling loops.
+`v0.1.2` is an experimental production-loop foundation. The next milestone should be driven by real Blender character-modeling traces rather than adding more public tools.
 
 MIT licensed.
