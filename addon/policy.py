@@ -11,12 +11,14 @@ BANNED_NAMES = {
 
 BANNED_PREFIXES = (
     "bpy.app", "bpy.context.preferences", "bpy.data.libraries", "bpy.ops.console",
-    "bpy.ops.export", "bpy.ops.import", "bpy.ops.preferences", "bpy.ops.script",
-    "bpy.ops.wm", "bpy.path", "bpy.utils",
+    "bpy.ops.ed", "bpy.ops.export", "bpy.ops.file", "bpy.ops.image", "bpy.ops.import",
+    "bpy.ops.preferences", "bpy.ops.render", "bpy.ops.script", "bpy.ops.wm",
+    "bpy.path", "bpy.utils",
 )
 
 BANNED_ATTRS = {
-    "load", "load_post", "load_pre", "save", "save_post", "save_pre", "save_render", "write",
+    "filepath", "filepath_raw", "load", "load_post", "load_pre", "reload", "save",
+    "save_post", "save_pre", "save_render", "write",
 }
 
 
