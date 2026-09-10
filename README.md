@@ -16,6 +16,12 @@
 inspect -> apply -> render -> apply -> ...
 ```
 
+## v0.1.4 runtime hotfix
+
+A real Blender 5.2.1 smoke caught one regression in v0.1.3: a simple RNA transform assignment such as `O("o1").location.x = 1.25` could be applied in Blender but incorrectly reported as `noop:1` because the depsgraph notification was not observed in time.
+
+v0.1.4 adds a cheap object transform verifier around apparent no-op batches. Read-only `O()` access still stays revision-free, while real location/rotation/scale changes are promoted to a normal revision and invalidate render cache/checkpoint state correctly. No public MCP tool was added.
+
 ## v0.1.3 field-fix pass
 
 v0.1.3 is driven by the first real GPT-6 character-modeling trace. The public MCP surface remains exactly three tools.
@@ -123,7 +129,7 @@ After installing Blender or adding it to PATH:
 blender -b --python scripts/blender-smoke.py
 ```
 
-The smoke creates a cube, verifies a read-only `apply` does not advance the revision, checks bounds/rings inspection, mutates the cube, runs quality checks, and returns a 128 px validation render.
+The smoke creates a cube, verifies a read-only `apply` does not advance the revision, checks bounds/rings inspection, verifies a real transform does advance the revision, runs quality checks, and returns a 128 px validation render.
 
 ## Safety
 
@@ -133,6 +139,6 @@ See [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Status
 
-`v0.1.3` is a field-tested refinement candidate. GitHub CI covers TypeScript, Python syntax, guard policy, and checkpoint path tests; a real Blender runtime smoke is still required before treating the new field fixes as validated.
+`v0.1.4` is a runtime-hotfix candidate after a real Blender 5.2.1 smoke exposed the transform/no-op regression in v0.1.3. GitHub CI covers TypeScript, Python syntax, guard policy, and checkpoint path tests; rerun the real Blender smoke before treating the hotfix as validated.
 
 MIT licensed.
