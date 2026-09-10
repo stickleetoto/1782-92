@@ -45,8 +45,34 @@ class P178292_PT_panel(bpy.types.Panel):
 _CLASSES = (P178292_OT_start, P178292_OT_stop, P178292_PT_panel)
 
 
+def _registered_class(name: str):
+    """Return Blender's currently registered RNA class with this Python name.
+
+    Do not use ``cls.bl_rna`` as a registration test: RNA attributes can be
+    inherited or stale across extension reloads. Blender's bpy.types registry
+    is the source of truth for UI/operator registration.
+    """
+    return getattr(bpy.types, name, None)
+
+
 def _is_registered(cls: type) -> bool:
-    return getattr(cls, "bl_rna", None) is not None
+    return _registered_class(cls.__name__) is cls
+
+
+def _unregister_stale_name(cls: type) -> None:
+    """Remove a stale class registered under the same name, if possible.
+
+    This makes linked-development reloads deterministic without blindly
+    unregistering our fresh class. Failure is intentionally non-fatal: Blender
+    may already have detached an old RNA wrapper during extension reload.
+    """
+    stale = _registered_class(cls.__name__)
+    if stale is None or stale is cls:
+        return
+    try:
+        bpy.utils.unregister_class(stale)
+    except (RuntimeError, ValueError):
+        pass
 
 
 def register() -> None:
@@ -61,21 +87,30 @@ def register() -> None:
                 default="",
             ),
         )
+
     for cls in _CLASSES:
-        if not _is_registered(cls):
+        if _is_registered(cls):
+            continue
+        _unregister_stale_name(cls)
+        try:
             bpy.utils.register_class(cls)
+        except ValueError as exc:
+            # A same-bl_idname class can survive a linked dev reload even when
+            # bpy.types no longer exposes it by Python class name. Surface a
+            # useful error instead of silently leaving the add-on "enabled"
+            # without its panel/operators.
+            raise RuntimeError(f"1782-92 register failed for {cls.__name__}: {exc}") from exc
 
 
 def unregister() -> None:
     stop_bridge()
     for cls in reversed(_CLASSES):
-        # Blender can replace an RNA class when an add-on is reloaded from a
-        # different package path. In that case the old Python class loses
-        # bl_rna; attempting to unregister it raises during Blender shutdown.
-        if _is_registered(cls):
-            try:
-                bpy.utils.unregister_class(cls)
-            except RuntimeError:
-                pass
+        registered = _registered_class(cls.__name__)
+        if registered is None:
+            continue
+        try:
+            bpy.utils.unregister_class(registered)
+        except (RuntimeError, ValueError):
+            pass
     if hasattr(bpy.types.Scene, ROOT_PROP):
         delattr(bpy.types.Scene, ROOT_PROP)
