@@ -34,7 +34,7 @@ class PolicyTests(unittest.TestCase):
         self.assert_blocked("x.__class__", "private_attribute_blocked")
 
     def test_blocks_sensitive_bpy_prefix(self) -> None:
-        self.assert_blocked('bpy.ops.wm.open_mainfile(filepath="x")', "attribute_blocked:filepath")
+        self.assert_blocked('bpy.ops.wm.open_mainfile(filepath="x")', "api_blocked:bpy.ops.wm")
 
     def test_blocks_image_load_directly(self) -> None:
         self.assert_blocked('bpy.data.images.load("x.png")', "attribute_blocked:load")
