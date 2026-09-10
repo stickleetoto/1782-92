@@ -12,9 +12,9 @@ from typing import Any
 
 import bpy
 
-from . import engine, field_ops, hooks
+from . import engine, hooks, runtime_guard
 
-VERSION = "0.1.3"
+VERSION = "0.1.4"
 STATE_PATH = Path(tempfile.gettempdir()) / "1782-92-bridge.json"
 
 _SERVER: ThreadingHTTPServer | None = None
@@ -37,7 +37,7 @@ def _pump() -> float | None:
         except queue.Empty:
             break
         try:
-            job["result"] = field_ops.dispatch(job["path"], job["payload"])
+            job["result"] = runtime_guard.dispatch(job["path"], job["payload"])
         except Exception as exc:
             job["result"] = {"ok": False, "error": f"internal:{type(exc).__name__}:{exc}"}
         finally:
@@ -55,7 +55,7 @@ def _submit(path: str, payload: dict[str, Any], timeout: float) -> dict[str, Any
 
 
 class _Handler(BaseHTTPRequestHandler):
-    server_version = "1782-92/0.1.3"
+    server_version = "1782-92/0.1.4"
 
     def log_message(self, _format: str, *_args: Any) -> None:
         return
