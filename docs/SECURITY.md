@@ -15,10 +15,16 @@
 - Request size and wait times are bounded.
 - Disk checkpoints are retained adaptively.
 - The Node bridge never automatically replays `apply` after an ambiguous transport failure.
+- Reference files are exposed only through a user-selected root and `REF(rN)`; resolved paths must remain under that root.
+- Reference enumeration is capped and large files are ignored.
 
 ## Rollback limitation
 
-v0.1.1 attempts to push a Blender undo marker before `apply`. If generated code raises, one undo is attempted. Blender's undo system is not an ACID transaction mechanism, so complex operator behavior can make rollback incomplete. Treat it as a recovery guardrail only.
+v0.1.2 pushes a best-effort Blender undo marker before `apply`. If generated code raises, one undo is attempted and the prior active object, selection, and mode are restored when possible. Blender undo is not an ACID transaction mechanism, so complex operator behavior can still make rollback incomplete.
+
+## Reference workspace limitation
+
+Choosing a reference root explicitly grants the local bridge permission to load supported images from that folder. Do not point it at a directory containing images you do not want an attached agent to access. Symlinks resolving outside the selected root are rejected.
 
 ## Important limitation
 

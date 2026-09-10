@@ -14,7 +14,7 @@ import bpy
 
 from . import engine, hooks
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 STATE_PATH = Path(tempfile.gettempdir()) / "1782-92-bridge.json"
 
 _SERVER: ThreadingHTTPServer | None = None
@@ -55,7 +55,7 @@ def _submit(path: str, payload: dict[str, Any], timeout: float) -> dict[str, Any
 
 
 class _Handler(BaseHTTPRequestHandler):
-    server_version = "1782-92/0.1.1"
+    server_version = "1782-92/0.1.2"
 
     def log_message(self, _format: str, *_args: Any) -> None:
         return
@@ -80,7 +80,6 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:
             self._reply(400, {"ok": False, "error": "bad_json"})
             return
-        # Finish inside the MCP client's outer timeout so mutating calls fail unambiguously.
         timeout = 230.0 if self.path == "/render" else 170.0 if self.path == "/apply" else 12.0
         result = _submit(self.path, payload, timeout)
         self._reply(200 if result.get("ok") else 400, result)
