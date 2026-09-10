@@ -45,24 +45,37 @@ class P178292_PT_panel(bpy.types.Panel):
 _CLASSES = (P178292_OT_start, P178292_OT_stop, P178292_PT_panel)
 
 
+def _is_registered(cls: type) -> bool:
+    return getattr(cls, "bl_rna", None) is not None
+
+
 def register() -> None:
-    setattr(
-        bpy.types.Scene,
-        ROOT_PROP,
-        StringProperty(
-            name="Reference Workspace",
-            description="Folder AI may access through inspect(refs) and REF(rN)",
-            subtype="DIR_PATH",
-            default="",
-        ),
-    )
+    if not hasattr(bpy.types.Scene, ROOT_PROP):
+        setattr(
+            bpy.types.Scene,
+            ROOT_PROP,
+            StringProperty(
+                name="Reference Workspace",
+                description="Folder AI may access through inspect(refs) and REF(rN)",
+                subtype="DIR_PATH",
+                default="",
+            ),
+        )
     for cls in _CLASSES:
-        bpy.utils.register_class(cls)
+        if not _is_registered(cls):
+            bpy.utils.register_class(cls)
 
 
 def unregister() -> None:
     stop_bridge()
     for cls in reversed(_CLASSES):
-        bpy.utils.unregister_class(cls)
+        # Blender can replace an RNA class when an add-on is reloaded from a
+        # different package path. In that case the old Python class loses
+        # bl_rna; attempting to unregister it raises during Blender shutdown.
+        if _is_registered(cls):
+            try:
+                bpy.utils.unregister_class(cls)
+            except RuntimeError:
+                pass
     if hasattr(bpy.types.Scene, ROOT_PROP):
         delattr(bpy.types.Scene, ROOT_PROP)
