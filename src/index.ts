@@ -3,7 +3,7 @@ import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import * as z from 'zod/v4';
 import { callBridge, type BridgeReply } from './bridge.js';
 
-const VERSION = '0.1.4';
+const VERSION = '0.1.5';
 
 function compact(value: BridgeReply): Record<string, unknown> {
   const { ok: _ok, ...rest } = value;
@@ -34,7 +34,7 @@ function createServer(): McpServer {
   server.registerTool(
     'inspect',
     {
-      description: 'Compact state. q=summary|objects|selection|materials|refs|ref:rN|quality|oN[:mesh|uv|mat|rig|bounds|rings]|collections|collection:NAME|api:bpy.ops.*.',
+      description: 'Compact state. Prefer summary, collections/collection:NAME and targeted oN queries; global objects/quality and rings are token-bounded. q=summary|objects|selection|materials|refs|ref:rN|quality|quality:oN|oN[:mesh|uv|mat|rig|bounds|rings]|collections|collection:NAME|api:bpy.ops.*.',
       inputSchema: z.object({ q: z.string().max(128).optional() }),
       annotations: { readOnlyHint: true, idempotentHint: true },
     },
@@ -50,13 +50,16 @@ function createServer(): McpServer {
   server.registerTool(
     'apply',
     {
-      description: "Batch guarded bpy. O('oN') resolves objects; REF('rN') loads only user-approved references. Read-only/no-op batches do not consume revisions.",
-      inputSchema: z.object({ code: z.string().min(1).max(65_536) }),
+      description: "Short guarded bpy batch; split large work into 1-3 logical objects. O('oN') resolves objects, REF('rN') references, and M has reusable material/mesh/tube/clump/panel/ellipsoid helpers. checkpoint=true forces a recovery copy. Python batches have a cooperative deadline; never replay a timeout before inspect.",
+      inputSchema: z.object({
+        code: z.string().min(1).max(24_576),
+        checkpoint: z.boolean().optional(),
+      }),
       annotations: { destructiveHint: true, idempotentHint: false },
     },
-    async ({ code }) => {
+    async ({ code, checkpoint }) => {
       try {
-        return textResult(await callBridge<BridgeReply>('/apply', { code }, 180_000));
+        return textResult(await callBridge<BridgeReply>('/apply', { code, checkpoint }, 35_000));
       } catch (error) {
         return errorResult(error);
       }
@@ -66,7 +69,7 @@ function createServer(): McpServer {
   server.registerTool(
     'render',
     {
-      description: 'Validation images. Scene: fast/lookdev/wire. Reference: ref=rN or refs=[rN..] returns approved source images directly without scene edits.',
+      description: 'Validation images. Prefer 512-768 during iteration; 1024 for final review. Scene: fast/lookdev/wire. Reference: ref=rN or refs=[rN..] returns approved source images directly.',
       inputSchema: z.object({
         views: z.array(z.enum(['front', 'side', 'back', 'three_quarter'])).max(4).optional(),
         ids: z.array(z.string().regex(/^o\d+$/)).max(128).optional(),
