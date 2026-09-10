@@ -34,10 +34,20 @@ class PolicyTests(unittest.TestCase):
         self.assert_blocked("x.__class__", "private_attribute_blocked")
 
     def test_blocks_sensitive_bpy_prefix(self) -> None:
-        self.assert_blocked('bpy.ops.wm.open_mainfile(filepath="x")', "api_blocked:bpy.ops.wm")
+        self.assert_blocked('bpy.ops.wm.open_mainfile(filepath="x")', "attribute_blocked:filepath")
 
     def test_blocks_image_load_directly(self) -> None:
         self.assert_blocked('bpy.data.images.load("x.png")', "attribute_blocked:load")
+
+    def test_blocks_render_file_write(self) -> None:
+        self.assert_blocked('bpy.context.scene.render.filepath="/tmp/x.png"', "attribute_blocked:filepath")
+        self.assert_blocked('bpy.ops.render.render(write_still=True)', "api_blocked:bpy.ops.render")
+
+    def test_blocks_undo_escape(self) -> None:
+        self.assert_blocked('bpy.ops.ed.undo()', "api_blocked:bpy.ops.ed")
+
+    def test_blocks_reference_retarget_reload(self) -> None:
+        self.assert_blocked('REF("r1").reload()', "attribute_blocked:reload")
 
 
 if __name__ == "__main__":
