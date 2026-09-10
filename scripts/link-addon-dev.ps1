@@ -29,7 +29,13 @@ if ($BlenderVersion -notmatch '^\d+\.\d+$') {
 
 $ExtensionRoot = Join-Path $BlenderRoot "$BlenderVersion\extensions\user_default"
 $Target = Join-Path $ExtensionRoot "p1782_92"
-$Backup = "$Target.package-backup"
+
+# Never keep backups inside extensions\user_default. Blender scans children in
+# that directory as extension packages, so names such as
+# p1782_92.package-backup can be interpreted as importable extension modules.
+$BackupRoot = Join-Path $BlenderRoot "$BlenderVersion\1782-92-backups"
+$Backup = Join-Path $BackupRoot "p1782_92"
+$LegacyBackup = "$Target.package-backup"
 
 if (Get-Process blender -ErrorAction SilentlyContinue) {
     throw "Blender is running. Save your work, close Blender, then run this script again."
@@ -56,6 +62,27 @@ function Get-LinkTarget([string]$Path) {
     }
 }
 
+function Move-LegacyBackupOutOfExtensionRoot {
+    if (-not (Test-Path -LiteralPath $LegacyBackup)) {
+        return
+    }
+
+    if (Test-Path -LiteralPath $Backup) {
+        throw "Both legacy and safe add-on backups exist. Resolve these before continuing:`n  Legacy: $LegacyBackup`n  Safe  : $Backup"
+    }
+
+    New-Item -ItemType Directory -Force -Path $BackupRoot | Out-Null
+    Move-Item -LiteralPath $LegacyBackup -Destination $Backup
+    Write-Host "Migrated legacy packaged add-on backup out of Blender's extension scan path:"
+    Write-Host "  $LegacyBackup"
+    Write-Host "  -> $Backup"
+}
+
+# v0.1.4 and earlier versions of this helper stored the packaged backup next
+# to the live extension. Migrate it before any early return so an already-
+# linked checkout also repairs the broken backup layout.
+Move-LegacyBackupOutOfExtensionRoot
+
 if ($Remove) {
     if (Test-Path -LiteralPath $Target) {
         if (-not (Test-ReparsePoint $Target)) {
@@ -68,6 +95,13 @@ if ($Remove) {
     if (Test-Path -LiteralPath $Backup) {
         Move-Item -LiteralPath $Backup -Destination $Target
         Write-Host "Restored packaged add-on backup: $Target"
+        try {
+            if ((Test-Path -LiteralPath $BackupRoot) -and -not (Get-ChildItem -LiteralPath $BackupRoot -Force | Select-Object -First 1)) {
+                Remove-Item -LiteralPath $BackupRoot -Force
+            }
+        } catch {
+            # Backup-root cleanup is cosmetic; never fail restoration because of it.
+        }
     } else {
         Write-Host "No packaged add-on backup existed."
     }
@@ -90,8 +124,9 @@ if (Test-Path -LiteralPath $Target) {
     if (Test-Path -LiteralPath $Backup) {
         throw "Backup already exists at $Backup. Resolve it before installing the development link."
     }
+    New-Item -ItemType Directory -Force -Path $BackupRoot | Out-Null
     Move-Item -LiteralPath $Target -Destination $Backup
-    Write-Host "Backed up packaged add-on to: $Backup"
+    Write-Host "Backed up packaged add-on outside Blender's extension scan path: $Backup"
 }
 
 New-Item -ItemType Junction -Path $Target -Target $Source | Out-Null

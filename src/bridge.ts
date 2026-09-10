@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 const STATE_FILE = process.env.P178292_STATE_FILE ?? join(tmpdir(), '1782-92-bridge.json');
 const STATE_TTL_MS = 1000;
-const EXPECTED_BRIDGE_VERSION = '0.1.5';
+const EXPECTED_BRIDGE_VERSION = '0.1.6';
 
 interface BridgeState {
   host: '127.0.0.1';
