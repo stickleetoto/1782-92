@@ -36,6 +36,22 @@ class PolicyTests(unittest.TestCase):
         self.assertLess(len(code.encode("utf-8")), POLICY.MAX_CODE_BYTES)
         self.assert_blocked(code, "batch_too_complex")
 
+    def test_blocks_large_literal_range(self) -> None:
+        code = f"for i in range({POLICY.MAX_LITERAL_RANGE + 1}):\n    x = i"
+        self.assert_blocked(code, "loop_too_large")
+
+    def test_allows_small_operator_loop(self) -> None:
+        tree = validate_code("for i in range(8):\n    bpy.ops.mesh.primitive_cube_add(size=1)")
+        self.assertIsNotNone(tree)
+
+    def test_blocks_estimated_operator_work(self) -> None:
+        code = "for i in range(100):\n    bpy.ops.mesh.primitive_cube_add(size=1)"
+        self.assert_blocked(code, "operator_work_too_large")
+
+    def test_blocks_nested_estimated_operator_work(self) -> None:
+        code = "for i in range(10):\n    for j in range(10):\n        bpy.ops.mesh.primitive_cube_add(size=1)"
+        self.assert_blocked(code, "operator_work_too_large")
+
     def test_blocks_imports(self) -> None:
         self.assert_blocked("import os", "import_blocked")
 
