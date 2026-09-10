@@ -3,7 +3,7 @@ import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import * as z from 'zod/v4';
 import { callBridge, type BridgeReply } from './bridge.js';
 
-const VERSION = '0.1.3';
+const VERSION = '0.1.4';
 
 function compact(value: BridgeReply): Record<string, unknown> {
   const { ok: _ok, ...rest } = value;
