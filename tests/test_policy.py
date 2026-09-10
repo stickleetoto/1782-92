@@ -26,7 +26,9 @@ class PolicyTests(unittest.TestCase):
         self.assertIsNotNone(tree)
 
     def test_blocks_oversized_generated_batch(self) -> None:
-        code = "x = 1\n" * 4000
+        # One syntactically-valid statement whose payload alone exceeds the
+        # byte budget, so this exercises size before AST-complexity limits.
+        code = 'x = "' + ("a" * (POLICY.MAX_CODE_BYTES + 1)) + '"'
         self.assert_blocked(code, "batch_too_large")
 
     def test_blocks_overcomplex_generated_batch(self) -> None:
