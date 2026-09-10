@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import bpy
+from bpy.props import StringProperty
 
 from .bridge_server import is_running, start_bridge, stop_bridge
+from .references import ROOT_PROP
 
 
 class P178292_OT_start(bpy.types.Operator):
@@ -36,12 +38,24 @@ class P178292_PT_panel(bpy.types.Panel):
         layout = self.layout
         layout.label(text="RUNNING" if is_running() else "STOPPED")
         layout.operator("p178292.stop" if is_running() else "p178292.start")
+        layout.separator()
+        layout.prop(context.scene, ROOT_PROP, text="Refs")
 
 
 _CLASSES = (P178292_OT_start, P178292_OT_stop, P178292_PT_panel)
 
 
 def register() -> None:
+    setattr(
+        bpy.types.Scene,
+        ROOT_PROP,
+        StringProperty(
+            name="Reference Workspace",
+            description="Folder AI may access through inspect(refs) and REF(rN)",
+            subtype="DIR_PATH",
+            default="",
+        ),
+    )
     for cls in _CLASSES:
         bpy.utils.register_class(cls)
 
@@ -50,3 +64,5 @@ def unregister() -> None:
     stop_bridge()
     for cls in reversed(_CLASSES):
         bpy.utils.unregister_class(cls)
+    if hasattr(bpy.types.Scene, ROOT_PROP):
+        delattr(bpy.types.Scene, ROOT_PROP)
