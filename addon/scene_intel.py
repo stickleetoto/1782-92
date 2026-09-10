@@ -14,7 +14,9 @@ from . import engine
 MAX_TREE_ROWS = 64
 MAX_FIND_ROWS = 16
 MAX_NEAR_ROWS = 8
-MAX_VIEWPORT_BYTES = 16 * 1024 * 1024
+# Keep the encoded MCP image comfortably below the bridge-wide 8 MiB base64
+# response budget. PNG base64 expands raw bytes by about 4/3.
+MAX_VIEWPORT_BYTES = 6 * 1024 * 1024
 _SPATIAL_TYPES = {"MESH", "CURVE", "SURFACE", "META", "FONT"}
 
 
@@ -161,9 +163,10 @@ def _viewport_capture() -> dict[str, Any]:
             result = bpy.ops.screen.screenshot_area(filepath=str(path), check_existing=False, hide_props_region=True)
         if "FINISHED" not in result or not path.exists():
             return {"ok": False, "error": "viewport_capture_failed"}
+        size = path.stat().st_size
+        if size > MAX_VIEWPORT_BYTES:
+            return {"ok": False, "error": f"viewport_too_large:{size}>{MAX_VIEWPORT_BYTES}"}
         data = path.read_bytes()
-        if len(data) > MAX_VIEWPORT_BYTES:
-            return {"ok": False, "error": "viewport_too_large"}
         return {
             "ok": True,
             "rev": engine._REV,
