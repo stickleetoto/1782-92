@@ -15,7 +15,7 @@ interface BridgeState {
 
 export interface BridgeImage {
   view: string;
-  mime: 'image/png';
+  mime: string;
   data: string;
 }
 
