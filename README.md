@@ -8,17 +8,27 @@
 
 | Tool | Purpose |
 |---|---|
-| `inspect` | Compact state, deep object inspection, references, quality checks, API probes |
+| `inspect` | Compact state, deep object inspection, references, measurements, quality checks, API probes |
 | `apply` | One guarded `bpy` batch with short object/reference resolvers |
-| `render` | Fast, lookdev, or wire validation PNGs |
+| `render` | Scene validation or direct approved-reference images |
 
 ```text
 inspect -> apply -> render -> apply -> ...
 ```
 
+## v0.1.3 field-fix pass
+
+v0.1.3 is driven by the first real GPT-6 character-modeling trace. The public MCP surface remains exactly three tools.
+
+- **Direct reference preview:** `render({ ref: "r5" })` or up to four `refs` returns approved source images directly. No temporary plane/material and no scene revision are required.
+- **Reference metadata:** `inspect("ref:r5")` returns compact name, dimensions, and file size. The older `refs:r5` spelling is accepted as an alias.
+- **Read-only apply detection:** batches that only inspect/print state return `noop:1` and do not consume a revision or checkpoint.
+- **Measurement inspect:** `oN:bounds`, `oN:rings`, `collections`, and `collection:NAME` reduce the need to use `apply` for geometry bookkeeping.
+- **Canonical checkpoint recovery:** reopening `Speaki.r00013.blend` now continues as `Speaki.rNNNNN.blend` in the original project checkpoint directory instead of producing nested roots or names such as `Speaki.r00013.r00001.blend`.
+
 ## v0.1.2 production-loop pass
 
-The external tool count is still exactly three. Internally v0.1.2 adds the missing pieces for longer modeling sessions:
+The external tool count is still exactly three. v0.1.2 added the missing pieces for longer modeling sessions:
 
 - **Reference workspace:** user chooses one folder; `inspect("refs")` returns `rN` IDs and `REF("rN")` safely loads only those images.
 - **Deep inspect:** `oN:mesh`, `oN:uv`, `oN:mat`, and `oN:rig` expose detail only when requested.
@@ -68,7 +78,11 @@ For image references, choose the approved folder in the **Refs** field in the sa
 ```text
 inspect()
 inspect({ q: "refs" })
+inspect({ q: "ref:r5" })
 inspect({ q: "o3:mesh" })
+inspect({ q: "o3:bounds" })
+inspect({ q: "o3:rings" })
+inspect({ q: "collection:Speaky_Phase01_Body_Blockout" })
 inspect({ q: "quality:o3" })
 inspect({ q: "api:bpy.ops.mesh.primitive_cube_add" })
 ```
@@ -82,13 +96,24 @@ head.scale.z *= 1.02
 img = REF("r1")
 ```
 
-Validation:
+A read-only batch remains valid, but it no longer creates a false edit revision:
+
+```python
+head = O("o3")
+print(head.name, tuple(head.dimensions))
+```
+
+Validation and reference viewing:
 
 ```text
 render()
 render({ mode: "wire", ids: ["o3"] })
 render({ mode: "lookdev", views: ["front", "side", "back", "three_quarter"] })
+render({ ref: "r5" })
+render({ refs: ["r1", "r4", "r5"] })
 ```
+
+Reference preview returns the approved source image bytes directly; scene `size`, `views`, and render mode are not used in reference mode. A single direct preview is capped at 16 MiB to avoid oversized MCP payloads.
 
 ## Real Blender smoke
 
@@ -98,16 +123,16 @@ After installing Blender or adding it to PATH:
 blender -b --python scripts/blender-smoke.py
 ```
 
-The smoke creates a cube, resolves it by `O("oN")`, deep-inspects it, runs quality checks, and returns a 128 px validation render.
+The smoke creates a cube, verifies a read-only `apply` does not advance the revision, checks bounds/rings inspection, mutates the cube, runs quality checks, and returns a 128 px validation render.
 
 ## Safety
 
-`apply` is a guardrail for trusted local AI clients, **not a hostile-code sandbox**. The bridge is loopback-only and authenticated. Direct file loading remains blocked; references are exposed only from the folder explicitly selected by the user.
+`apply` is a guardrail for trusted local AI clients, **not a hostile-code sandbox**. The bridge is loopback-only and authenticated. Direct arbitrary file loading remains blocked; references are exposed only from the folder explicitly selected by the user.
 
 See [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Status
 
-`v0.1.2` is an experimental production-loop foundation. The next milestone should be driven by real Blender character-modeling traces rather than adding more public tools.
+`v0.1.3` is a field-tested refinement candidate. GitHub CI covers TypeScript, Python syntax, guard policy, and checkpoint path tests; a real Blender runtime smoke is still required before treating the new field fixes as validated.
 
 MIT licensed.
